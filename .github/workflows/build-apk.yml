@@ -44,6 +44,23 @@ jobs:
         with:
           gradle-version: '8.7'
 
+      - name: Configure Debug Signing
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("app/build.gradle")
+          s = p.read_text()
+          guard = '''            if (!System.getenv("THABAT_KEYSTORE_PATH")) {
+                          throw new GradleException("Missing THABAT_KEYSTORE_PATH. Configure GitHub signing secrets before building a release.")
+                      }
+          '''
+          s = s.replace(guard, "")
+          s = s.replace("debug {\n            signingConfig signingConfigs.release", "debug {\n            signingConfig signingConfigs.debug")
+          p.write_text(s)
+          print("Debug build configured to use Android's automatic debug key.")
+          PY
+
       - name: Build installable Debug APK (no user secrets required)
         working-directory: ${{ env.PROJECT_DIR }}
         run: gradle assembleDebug --no-daemon
@@ -70,4 +87,4 @@ jobs:
           TAG="debug-v1.0.${{ github.run_number }}"
           gh release create "$TAG" "${{ env.PROJECT_DIR }}/release_output/Thabat-ZadAlKhair-Debug.apk" \
             --title "ثبات | زاد الخير - نسخة تجريبية ($TAG)" \
-            --notes "نسخة Android تجريبية موقعة تلقائياً بمفتاح Debug. لا تحتاج إلى أسرار توقيع. هذه ليست نسخة إنتاج نهائية.";
+            --notes "نسخة Android تجريبية موقعة تلقائياً بمفتاح Debug. لا تحتاج إلى أسرار توقيع. هذه ليست نسخة إنتاج نهائية."
