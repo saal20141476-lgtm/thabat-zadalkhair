@@ -57,6 +57,15 @@ jobs:
           '''
           s = s.replace(guard, "")
           s = s.replace("debug {\n            signingConfig signingConfigs.release", "debug {\n            signingConfig signingConfigs.debug")
+          s += """
+          
+          // Remove legacy split Kotlin stdlib artifacts that duplicate classes
+          // already included in kotlin-stdlib 1.8.22.
+          configurations.configureEach {
+              exclude group: "org.jetbrains.kotlin", module: "kotlin-stdlib-jdk7"
+              exclude group: "org.jetbrains.kotlin", module: "kotlin-stdlib-jdk8"
+          }
+          """
           p.write_text(s)
           print("Debug build configured to use Android's automatic debug key.")
           PY
