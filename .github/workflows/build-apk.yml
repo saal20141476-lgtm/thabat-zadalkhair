@@ -1,0 +1,97 @@
+name: Build Thabat APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Unzip Project Archive
+        run: |
+          ZIP_FILE=$(find . -maxdepth 1 -type f -name '*.zip' -print -quit)
+          if [ -n "$ZIP_FILE" ]; then
+            unzip -o "$ZIP_FILE" -d project_src
+          else
+            echo "Project ZIP archive not found in repository root."
+            exit 1
+          fi
+          ROOT_DIR=$(find project_src -mindepth 1 -maxdepth 1 -type d | head -n 1)
+          if [ -n "$ROOT_DIR" ] && [ -f "$ROOT_DIR/settings.gradle" ]; then
+            echo "PROJECT_DIR=$ROOT_DIR" >> "$GITHUB_ENV"
+          elif [ -f project_src/settings.gradle ]; then
+            echo "PROJECT_DIR=project_src" >> "$GITHUB_ENV"
+          else
+            echo "Gradle project root not found in ZIP."
+            exit 1
+          fi
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 8.7
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Restore private signing key
+        env:
+          THABAT_KEYSTORE_BASE64: ${{ secrets.THABAT_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$THABAT_KEYSTORE_BASE64" || (echo "Missing THABAT_KEYSTORE_BASE64 secret" && exit 1)
+          echo "$THABAT_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/thabat-release.jks"
+          test -s "$RUNNER_TEMP/thabat-release.jks"
+
+      - name: Build Signed Release APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        env:
+          THABAT_KEYSTORE_PATH: ${{ runner.temp }}/thabat-release.jks
+          THABAT_STORE_PASSWORD: ${{ secrets.THABAT_STORE_PASSWORD }}
+          THABAT_KEY_ALIAS: ${{ secrets.THABAT_KEY_ALIAS }}
+          THABAT_KEY_PASSWORD: ${{ secrets.THABAT_KEY_PASSWORD }}
+        run: gradle assembleRelease --no-daemon
+
+      - name: Prepare Stable APK Filename
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          APK=$(find app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' | head -n 1)
+          test -n "$APK"
+          cp "$APK" app/build/outputs/apk/release/Thabat-ZadAlKhair.apk
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Thabat-ZadAlKhair-APK
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/release/Thabat-ZadAlKhair.apk
+          if-no-files-found: error
+
+      - name: Publish Latest Direct Download Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v1.0.${{ github.run_number }}"
+          gh release create "$TAG" "${{ env.PROJECT_DIR }}/app/build/outputs/apk/release/Thabat-ZadAlKhair.apk" \
+            --title "ثبات | زاد الخير ($TAG)" \
+            --notes "إصدار أندرويد رسمي وموقّع — تحميل مباشر من مصدر المشروع."
+
+      - name: Publish Download Page to docs/
+        run: |
+          mkdir -p docs
+          cp "${{ env.PROJECT_DIR }}/docs/index.html" docs/index.html
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/index.html
+          git diff --staged --quiet || git commit -m "Publish direct APK download page"
+          git push
